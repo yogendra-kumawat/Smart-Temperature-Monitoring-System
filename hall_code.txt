@@ -1,0 +1,120 @@
+#include "main.h"
+#include "lcd.h"
+#include <stdio.h>
+
+ADC_HandleTypeDef hadc;
+GPIO_InitTypeDef GPIO_InitStruct;
+uint8_t isCelsius = 1;  // 1 for Celsius, 0 for Fahrenheit
+
+void SystemClock_Config(void);
+void MX_GPIO_Init(void);
+void MX_ADC_Init(void);
+
+float Read_Temperature();
+void Update_Display(float temp, uint8_t mode);
+void Check_Button();
+
+int main(void)
+{
+  HAL_Init();
+  SystemClock_Config();
+  MX_GPIO_Init();
+  MX_ADC_Init();
+  LCD_Init();
+  
+  LCD_Clear();
+  LCD_Set_Cursor(1,1);
+  LCD_Write_String("Temp Monitor");
+
+  HAL_Delay(1000);
+  LCD_Clear();
+
+  while (1)
+  {
+    Check_Button();
+    float temp = Read_Temperature();
+    Update_Display(temp, isCelsius);
+    HAL_Delay(1000);
+  }
+}
+
+// Read Analog Value from LM35
+float Read_Temperature()
+{
+  HAL_ADC_Start(&hadc);
+  HAL_ADC_PollForConversion(&hadc, HAL_MAX_DELAY);
+  uint32_t adc_val = HAL_ADC_GetValue(&hadc);
+  float voltage = (adc_val * 3.3f) / 4095.0f;
+  float tempC = voltage * 100.0f;  // 10mV per degree
+  return isCelsius ? tempC : (tempC * 9.0f / 5.0f) + 32.0f;
+}
+
+// Update the LCD
+void Update_Display(float temp, uint8_t mode)
+{
+  char buffer[16];
+  LCD_Clear();
+  sprintf(buffer, "Temp: %.1f", temp);
+  LCD_Set_Cursor(1, 1);
+  LCD_Write_String(buffer);
+  
+  LCD_Set_Cursor(2, 1);
+  LCD_Write_String(mode ? "Mode: Celsius" : "Mode: Fahrenheit");
+}
+
+// Toggle Mode on Button Press
+void Check_Button()
+{
+  static uint8_t prev_state = 1;
+  uint8_t curr_state = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3);
+  if (prev_state == 1 && curr_state == 0)
+  {
+    HAL_Delay(50); // debounce
+    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == 0)
+    {
+      isCelsius = !isCelsius;
+    }
+  }
+  prev_state = curr_state;
+}
+
+// ADC Init
+void MX_ADC_Init(void)
+{
+  __HAL_RCC_ADC1_CLK_ENABLE();
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+  hadc.Instance = ADC1;
+  hadc.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc.Init.ContinuousConvMode = DISABLE;
+  hadc.Init.DiscontinuousConvMode = DISABLE;
+  hadc.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc.Init.NbrOfConversion = 1;
+  HAL_ADC_Init(&hadc);
+
+  sConfig.Channel = ADC_CHANNEL_7;  // PA7
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_13CYCLES_5;
+  HAL_ADC_ConfigChannel(&hadc, &sConfig);
+}
+
+// GPIO Init
+void MX_GPIO_Init(void)
+{
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  // LCD Pins
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  // Button Input (PB3)
+  GPIO_InitStruct.Pin = GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+}
